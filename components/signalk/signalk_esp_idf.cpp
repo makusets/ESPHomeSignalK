@@ -208,8 +208,9 @@ HttpResponse SignalKEspIdf::post(const std::string &path, const std::string &msg
   esp_http_client_set_post_field(client, msg.c_str(), msg.length());
   esp_err_t err = esp_http_client_perform(client);
   const int status = esp_http_client_get_status_code(client);
-  if (err != ESP_OK)
+  if (err != ESP_OK) {
     ESP_LOGW(TAG, "SignalK HTTP POST error: %s (HTTP status %d)", esp_err_to_name(err), status);
+  }
 
   HttpResponse resp;
   resp.status_code = http_response_status(err, status);

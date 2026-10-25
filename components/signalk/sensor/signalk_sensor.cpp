@@ -52,14 +52,15 @@ void SignalkSensor::loop() {
   }
   if (now - last_diagnostic_ms_ >= 30000) {
     last_diagnostic_ms_ = now;
-    if (!received_value_)
+    if (!received_value_) {
       ESP_LOGW(
           TAG,
           "Path '%s': connected but no valid numeric value received; check path, access permissions and source updates",
           path_.c_str());
-    else
+    } else {
       ESP_LOGD(TAG, "Path '%s': last valid value received %u ms ago", path_.c_str(),
                static_cast<unsigned>(now - last_value_ms_));
+    }
   }
 }
 
