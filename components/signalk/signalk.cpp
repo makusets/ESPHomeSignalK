@@ -127,12 +127,17 @@ void SignalK::on_connected() {
     subscription["format"] = (*it)->get_format();
     subscription["policy"] = (*it)->get_policy();
     subscription["minPeriod"] = (*it)->get_min_period();
+    ESP_LOGI(TAG, "Subscribing to '%s' (period=%d ms, format=%s, policy=%s)", path.c_str(), (*it)->get_period(),
+             (*it)->get_format().c_str(), (*it)->get_policy().c_str());
     topics.insert(path);
   }
   std::string output;
   serializeJsonPretty(doc, output);
   ESP_LOGD(TAG, "Subscription message: %s", output.c_str());
-  send(output);
+  if (!send(output))
+    ESP_LOGE(TAG, "Failed to send SignalK subscriptions; sensor values will not arrive");
+  else
+    ESP_LOGI(TAG, "Sent subscriptions for %u SignalK paths; waiting for values", static_cast<unsigned>(topics.size()));
 }
 
 void SignalK::on_disconnected() {
@@ -334,52 +339,47 @@ void SignalK::load_token() {
 }
 
 void SignalK::on_message(const std::string &msg) {
-  // ESP_LOGD(TAG, "Received message: %s", msg.c_str());
   JsonDocument doc;
-  deserializeJson(doc, msg);
-  // Check if this is a delta message
-  JsonArray arr = doc["updates"][0]["values"].as<JsonArray>();
-  if (!arr.isNull())
-    this->on_receive_delta(arr);
-  JsonArray put_arr = doc["put"].as<JsonArray>();
-  if (!put_arr.isNull())
-    this->on_receive_delta(put_arr);
-  // Check if this a token validation message
+  auto error = deserializeJson(doc, msg);
+  if (error) {
+    ESP_LOGW(TAG, "Cannot parse SignalK WebSocket message (%u bytes): %s", static_cast<unsigned>(msg.size()),
+             error.c_str());
+    return;
+  }
+  if (doc["statusCode"].is<int>()) {
+    int status = doc["statusCode"].as<int>();
+    if (status >= 400)
+      ESP_LOGW(TAG, "SignalK server reported stream/request error: statusCode=%d", status);
+  }
+  JsonArray updates = doc["updates"].as<JsonArray>();
+  ESP_LOGV(TAG, "Received SignalK message with %u updates", static_cast<unsigned>(updates.size()));
+  for (JsonObject update : updates) {
+    JsonArray values = update["values"].as<JsonArray>();
+    if (!values.isNull())
+      on_receive_delta(values);
+  }
+  JsonArray put = doc["put"].as<JsonArray>();
+  if (!put.isNull())
+    on_receive_delta(put);
 }
 
 void SignalK::on_receive_delta(JsonArray &arr) {
-  // JsonArray arr = doc["updates"][0]["values"].as<JsonArray>();
   for (JsonVariant delta : arr) {
     if (!delta["path"].is<std::string>()) {
+      ESP_LOGV(TAG, "Ignoring SignalK value without a string path");
       continue;
     }
-    auto path = delta["path"].as<std::string>();
-    // bool found = false;
-    // auto sensor = sensors_[path];
-
-    // if (sensor == NULL)
-    // {
-    for (auto it = sensors_.begin(); it != sensors_.end(); ++it) {
-      if ((*it)->get_path() == path) {
-        set_sensor_value(*it, delta["value"]);
+    const auto path = delta["path"].as<std::string>();
+    bool matched = false;
+    for (auto *subscriber : sensors_) {
+      if (match_path(path, subscriber->get_path())) {
+        matched = true;
+        ESP_LOGD(TAG, "Received SignalK path '%s' for subscription '%s'", path.c_str(), subscriber->get_path().c_str());
+        set_sensor_value(subscriber, delta["value"]);
       }
     }
-    // Exact key match was not found, lets try regexish matching
-    for (auto it = sensors_.begin(); it != sensors_.end(); ++it) {
-      if (match_path(path, (*it)->get_path())) {
-        set_sensor_value(*it, delta["value"]);
-      }
-    }
-    // for (auto it = sensors_.begin(); it != sensors_.end(); ++it) {
-    //   if (std::regex_match(path, std::regex((*it)->get_path()))) {
-    //     set_sensor_value((*it), delta["value"]);
-    //   }
-    // }
-
-    // if (sensor != NULL)
-    // {
-    //   set_sensor_value(sensor, delta["value"]);
-    // }
+    if (!matched)
+      ESP_LOGV(TAG, "No subscriber matches received SignalK path '%s'", path.c_str());
   }
 }
 

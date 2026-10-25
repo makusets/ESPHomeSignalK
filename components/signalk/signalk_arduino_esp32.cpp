@@ -57,10 +57,7 @@ bool SignalKArduino::connect(const std::string &path) {
   return isconnected_;
 }
 
-bool SignalKArduino::send(const std::string &msg) {
-  webSocketClient_.send(msg.c_str(), msg.length());
-  return true;
-}
+bool SignalKArduino::send(const std::string &msg) { return webSocketClient_.send(msg.c_str(), msg.length()); }
 
 bool SignalKArduino::discovery() {
   if (!MDNS.begin("esp32")) {  // start mDNS responder with some hostname

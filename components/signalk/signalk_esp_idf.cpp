@@ -176,7 +176,11 @@ bool SignalKEspIdf::send(const std::string &msg) {
     return false;
   }
   const TickType_t xDelay = 500;
-  esp_websocket_client_send_text(websocket_client, msg.c_str(), msg.size(), xDelay);
+  const int sent = esp_websocket_client_send_text(websocket_client, msg.c_str(), msg.size(), xDelay);
+  if (sent < 0 || static_cast<size_t>(sent) != msg.size()) {
+    ESP_LOGW(TAG, "SignalK WebSocket send failed: sent %d of %u bytes", sent, static_cast<unsigned>(msg.size()));
+    return false;
+  }
   return true;
 }
 

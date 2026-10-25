@@ -412,3 +412,33 @@ in the normal device web interface. Tokens are scoped to the server, port, and
 username so changing servers cannot reuse another server's token. Existing
 installations using access approval may need to approve the device once after
 upgrading to the scoped token storage.
+
+### Diagnose a sensor showing N/A
+
+SignalK sensors receive WebSocket updates; they do not poll the HTTP value API.
+Enable these log tags while investigating:
+
+```yaml
+logger:
+  level: DEBUG
+  logs:
+    signalk: DEBUG
+    signalk.sensor: DEBUG
+```
+
+On connection, logs list each subscription and whether the subscription message
+was sent. For each matching numeric value, `signalk.sensor` reports the raw value
+and the converted value published to ESPHome. Null, nonnumeric, non-finite, and
+failed conversion values are reported without publishing a false zero.
+
+If a numeric sensor is connected but has received no valid value for 30 seconds,
+a warning names its path and suggests checking the exact path, the device token's
+read permissions, and whether the source is actively producing updates. A value
+visible in the SignalK server may be a stored value that has not changed since
+the device subscribed. Once a value has arrived, a debug message reports its age
+every 30 seconds. Numeric values are published on the next ESPHome loop instead
+of waiting for the parent component's polling interval.
+
+For message counts and paths that do not match any subscription, temporarily set
+`level: VERBOSE` and `signalk: VERBOSE`. Malformed WebSocket JSON and server stream
+error status codes are also reported. Full incoming payloads are not logged.
