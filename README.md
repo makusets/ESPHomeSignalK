@@ -369,7 +369,7 @@ signalk:
 
 The web page provides **SignalK server address**, **SignalK server port**,
 **SignalK username**, **SignalK password**, and **Apply SignalK connection
-settings**. Enter a hostname or IP address without `http://` or a path. Edit each
+settings**. The port uses a numeric input box, not a slider. Enter a hostname or IP address without `http://` or a path. Edit each
 field, then press Apply to save all settings and reconnect immediately, without
 reflashing or rebooting. Subsequent failures retain the 30-second retry interval.
 The settings survive restarts and override the YAML defaults. Invalid settings

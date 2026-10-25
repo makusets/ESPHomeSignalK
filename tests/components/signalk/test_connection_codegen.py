@@ -38,6 +38,7 @@ class ConnectionCodegenTest(unittest.TestCase):
             )
             self.assertEqual(generated.returncode, 0, generated.stdout + generated.stderr)
             main = (build / "src/main.cpp").read_text()
+            self.assertIn("->traits.set_mode(number::NUMBER_MODE_BOX);", main)
             fields = re.findall(r"->set_field\(([^)]+)\)", main)
             self.assertEqual(len(fields), 3)
             header = (root / "components/signalk/connection_settings.h").read_text()

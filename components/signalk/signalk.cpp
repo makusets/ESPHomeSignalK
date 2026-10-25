@@ -163,7 +163,8 @@ void SignalK::login() {
   ESP_LOGI(TAG, "Logging in to SignalK at %s:%u", host_.c_str(), port_);
   auto response = post("/signalk/v1/auth/login", msg);
   if (response.status_code <= 0) {
-    ESP_LOGW(TAG, "SignalK server unreachable at %s:%u (HTTP status %d)", host_.c_str(), port_, response.status_code);
+    ESP_LOGW(TAG, "SignalK login request failed at %s:%u: no usable HTTP response (status %d)", host_.c_str(), port_,
+             response.status_code);
     return;
   }
   ESP_LOGI(TAG, "SignalK server responded at %s:%u (HTTP %d)", host_.c_str(), port_, response.status_code);
