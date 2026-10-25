@@ -4,7 +4,4 @@ packages:
 web_server:
   version: 3
 
-signalk:
-  connection_settings: {}
-  connected:
-    name: SignalK connected
+# Connection controls and the connected sensor are created by the base signalk config.

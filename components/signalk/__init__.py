@@ -198,13 +198,7 @@ SignalKConnectionPort = signalk_ns.class_("SignalKConnectionPort", number_core.N
 SignalKApplySettings = signalk_ns.class_("SignalKApplySettings", button_core.Button)
 
 
-def AUTO_LOAD(config):
-    components = []
-    if CONF_CONNECTION_SETTINGS in config:
-        components.extend(["text", "number", "button"])
-    if CONF_CONNECTED in config:
-        components.append("binary_sensor")
-    return components
+AUTO_LOAD = ["text", "number", "button", "binary_sensor"]
 
 
 def connection_text_schema(mode):
@@ -244,8 +238,8 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_NAME, default="esp32"): cv.string,
         cv.Optional(CONF_USERNAME, default=""): cv.string,
         cv.Optional(CONF_PASSWORD, default=""): cv.string,
-        cv.Optional(CONF_CONNECTION_SETTINGS): CONNECTION_SETTINGS_SCHEMA,
-        cv.Optional(CONF_CONNECTED): binary_sensor_core.binary_sensor_schema(
+        cv.Optional(CONF_CONNECTION_SETTINGS, default={}): CONNECTION_SETTINGS_SCHEMA,
+        cv.Optional(CONF_CONNECTED, default={"name": "SignalK connected"}): binary_sensor_core.binary_sensor_schema(
             device_class="connectivity", entity_category="diagnostic"
         ),
     }

@@ -354,7 +354,9 @@ host builds require an explicit `host`.
 
 ### Configure SignalK from the ESPHome web server
 
-Enable the standard ESPHome web server and opt into the connection controls:
+Connection controls and the connected binary sensor are created automatically
+whenever `signalk:` is configured. Enable the standard ESPHome web server to
+access them:
 
 ```yaml
 web_server:
@@ -363,9 +365,6 @@ web_server:
 signalk:
   host: 192.168.0.3  # Initial default; saved web settings take precedence.
   port: 3000
-  connection_settings: {}
-  connected:
-    name: "SignalK connected"
 ```
 
 The web page provides **SignalK server address**, **SignalK server port**,
@@ -385,8 +384,8 @@ are stored in the device's normal ESPHome preferences storage.
 
 **SignalK connected** is a connectivity binary sensor: on when the WebSocket is
 connected, off during authentication, retries, and disconnections. It is available
-in the web server and through the ESPHome API. It can also be enabled without the
-editable settings.
+in the web server and through the ESPHome API. No `connection_settings` or
+`connected` YAML entries are needed.
 
 Entity names and IDs can be customized individually:
 
