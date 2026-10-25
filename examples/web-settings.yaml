@@ -1,0 +1,31 @@
+esphome:
+  name: signalk-web-settings
+  friendly_name: SignalK Web Settings
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [signalk]
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+logger:
+
+web_server:
+  version: 3
+
+signalk:
+  # Optional initial defaults. Saved web settings take precedence after Apply.
+  host: 192.168.0.3
+  port: 3000
+  connection_settings: {}
+  connected:
+    name: SignalK connected

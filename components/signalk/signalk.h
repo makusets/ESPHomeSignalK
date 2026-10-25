@@ -11,6 +11,12 @@
 #include "signalk_subscriber.h"
 #include "utils.h"
 #include "unit_conversions.h"
+#ifdef USE_SIGNALK_CONNECTION_SETTINGS
+#include "connection_settings.h"
+#endif
+#ifdef USE_BINARY_SENSOR
+#include "esphome/components/binary_sensor/binary_sensor.h"
+#endif
 
 namespace esphome {
 namespace signalk {
@@ -51,6 +57,13 @@ class SignalK : public PollingComponent {
   void set_user_name(std::string user_name) { user_name_ = user_name; }
   void set_user_password(std::string user_password) { user_password_ = user_password; }
   void set_sensor_value(SignalkSubscriber *sensor, JsonVariant value);
+#ifdef USE_SIGNALK_CONNECTION_SETTINGS
+  ConnectionSettings &pending_settings() { return pending_settings_; }
+  void request_apply_settings() { apply_settings_requested_ = true; }
+#endif
+#ifdef USE_BINARY_SENSOR
+  void set_connected_sensor(binary_sensor::BinarySensor *sensor) { connected_sensor_ = sensor; }
+#endif
   void setup() override;
   void subscribe(SignalkSubscriber *sensor) {
     // Accessing elements using find()
@@ -62,7 +75,9 @@ class SignalK : public PollingComponent {
     // sensors_.insert(std::pair<std::string, SignalkSubscriber *>(sensor->get_path(), sensor));
   }
   void update() override;
+  void loop() override;
 
+  virtual void disconnect() = 0;
   virtual bool connect(const std::string &path) = 0;
   virtual bool discovery() = 0;
   virtual bool send(const std::string &msg) = 0;
@@ -73,6 +88,20 @@ class SignalK : public PollingComponent {
   virtual HttpResponse post(const std::string &path, const std::string &msg) = 0;
 
  protected:
+  uint32_t token_storage_key_() const;
+#ifdef USE_SIGNALK_CONNECTION_SETTINGS
+  void setup_connection_settings_();
+  void apply_connection_settings_();
+  ConnectionSettings pending_settings_;
+  ConnectionSettings active_settings_;
+  bool apply_settings_requested_{false};
+#endif
+#ifdef USE_BINARY_SENSOR
+  binary_sensor::BinarySensor *connected_sensor_{nullptr};
+  bool connection_sensor_state_{false};
+#endif
+  uint32_t last_connection_attempt_{0};
+  bool connection_attempted_{false};
   std::string host_;
   unsigned short port_;
   std::string device_name_;

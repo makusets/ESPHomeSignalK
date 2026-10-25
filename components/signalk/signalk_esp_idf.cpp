@@ -32,7 +32,8 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
       }
       break;
     case WEBSOCKET_EVENT_ERROR:
-      // ws_client->on_error();
+      ESP_LOGW(TAG, "SignalK WebSocket error; retrying in 30 seconds");
+      self->on_disconnected();
       break;
   }
 }
@@ -98,9 +99,19 @@ esp_err_t _http_event_handler(esp_http_client_event_t *evt) {
   return ESP_OK;
 }
 
+void SignalKEspIdf::disconnect() {
+  if (websocket_client != nullptr) {
+    esp_websocket_client_stop(websocket_client);
+    esp_websocket_client_destroy(websocket_client);
+    websocket_client = nullptr;
+  }
+}
+
 bool SignalKEspIdf::connect(const std::string &path) {
-  ESP_LOGD(TAG, "Connect");
+  disconnect();
   esp_websocket_client_config_t websocket_cfg = {};
+  websocket_cfg.disable_auto_reconnect = true;
+  websocket_cfg.network_timeout_ms = 10000;
   websocket_cfg.host = host_.c_str();
   websocket_cfg.port = port_;
   websocket_cfg.path = path.c_str();
@@ -117,15 +128,19 @@ bool SignalKEspIdf::connect(const std::string &path) {
 
   websocket_client = esp_websocket_client_init(&websocket_cfg);
 
+  if (websocket_client == nullptr) {
+    ESP_LOGE(TAG, "Failed to initialize SignalK WebSocket client");
+    return false;
+  }
   esp_websocket_register_events(websocket_client, WEBSOCKET_EVENT_ANY, websocket_event_handler, this);
-  isconnected_ = esp_websocket_client_start(websocket_client) == ESP_OK;
-  ESP_LOGD(TAG, "Connected");
-  return isconnected_;
+  const bool started = esp_websocket_client_start(websocket_client) == ESP_OK;
+  ESP_LOGD(TAG, "SignalK WebSocket connection attempt started");
+  return started;
 }
 
 bool SignalKEspIdf::discovery() {
   mdns_result_t *results = nullptr;
-  esp_err_t err = mdns_query_ptr("_signalk", "_http._tcp", 3000, 20, &results);
+  esp_err_t err = mdns_query_ptr("_signalk-http", "_tcp", 3000, 20, &results);
 
   if (err) {
     ESP_LOGE(TAG, "mDNS query failed: %s", esp_err_to_name(err));
@@ -138,16 +153,19 @@ bool SignalKEspIdf::discovery() {
   }
 
   for (mdns_result_t *r = results; r; r = r->next) {
-    ESP_LOGI(TAG, "Found service at %s:%u", r->hostname, r->port);
-    // Save hostname/port and use it to connect
+    ESP_LOGI(TAG, "Found SignalK service at %s:%u", r->hostname != nullptr ? r->hostname : "unknown", r->port);
+    if (r->hostname != nullptr && host_.empty()) {
+      host_ = std::string(r->hostname) + ".local";
+      port_ = r->port;
+    }
   }
 
   mdns_query_results_free(results);
-  return true;
+  return !host_.empty();
 }
 
 bool SignalKEspIdf::send(const std::string &msg) {
-  if (!esp_websocket_client_is_connected(websocket_client)) {
+  if (!is_connected()) {
     ESP_LOGW(TAG, "WebSocket client not connected, cannot send message");
     return false;
   }
@@ -179,9 +197,11 @@ HttpResponse SignalKEspIdf::post(const std::string &path, const std::string &msg
   esp_http_client_set_header(client, "Content-Type", "application/json");
   esp_http_client_set_post_field(client, msg.c_str(), msg.length());
   esp_err_t err = esp_http_client_perform(client);
+  if (err != ESP_OK)
+    ESP_LOGW(TAG, "SignalK HTTP POST failed: %s", esp_err_to_name(err));
 
   HttpResponse resp;
-  resp.status_code = esp_http_client_get_status_code(client);
+  resp.status_code = err == ESP_OK ? esp_http_client_get_status_code(client) : -1;
   // this->content_length = esp_http_client_get_content_length(client);
 
   // ESP_LOGI(TAG, "POST Status = %d, content_length = %d", status, this->content_length);
@@ -210,7 +230,6 @@ HttpResponse SignalKEspIdf::get(const std::string &path) {
     ESP_LOGW(TAG, "No authorization token provided");
   } else {
     auth_header_ = "Bearer " + token_;
-    ESP_LOGW(TAG, "Auth header: %s", auth_header_.c_str());
     esp_http_client_set_header(client, "Authorization", auth_header_.c_str());
   }
   esp_err_t err = esp_http_client_perform(client);
@@ -219,7 +238,7 @@ HttpResponse SignalKEspIdf::get(const std::string &path) {
   }
 
   HttpResponse resp;
-  resp.status_code = esp_http_client_get_status_code(client);
+  resp.status_code = err == ESP_OK ? esp_http_client_get_status_code(client) : -1;
   // this->content_length = esp_http_client_get_content_length(client);
 
   // ESP_LOGD(TAG, "GET Status = %d, content_length = %d", status, this->content_length);

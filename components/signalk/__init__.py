@@ -3,10 +3,18 @@ import re
 
 from esphome import automation
 import esphome.codegen as cg
+from esphome.components import (
+    binary_sensor as binary_sensor_core,
+    button as button_core,
+    number as number_core,
+    text as text_core,
+)
+from esphome.components.esp32 import add_idf_component, include_builtin_idf_component
 from esphome.config_helpers import filter_source_files_from_platform
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_ID,
+    CONF_MODE,
     CONF_NAME,
     CONF_PASSWORD,
     CONF_PATH,
@@ -15,9 +23,9 @@ from esphome.const import (
     CONF_VALUE,
     PlatformFramework,
 )
+
 # from esphome.components.esp32 import idf_component_register
 from esphome.core import CORE
-from esphome.components.esp32 import add_idf_component, include_builtin_idf_component
 
 CODEOWNERS = ["@batuakan"]
 # DEPENDENCIES = ["wifi"]
@@ -180,14 +188,66 @@ SIGNALK_META_SCHEMA = cv.Schema(
     }
 )
 
+
+CONF_CONNECTION_SETTINGS = "connection_settings"
+CONF_CONNECTED = "connected"
+CONF_APPLY = "apply"
+ConnectionSettingField = signalk_ns.enum("ConnectionSettingField")
+SignalKConnectionText = signalk_ns.class_("SignalKConnectionText", text_core.Text, cg.Component)
+SignalKConnectionPort = signalk_ns.class_("SignalKConnectionPort", number_core.Number, cg.Component)
+SignalKApplySettings = signalk_ns.class_("SignalKApplySettings", button_core.Button)
+
+
+def AUTO_LOAD(config):
+    components = []
+    if CONF_CONNECTION_SETTINGS in config:
+        components.extend(["text", "number", "button"])
+    if CONF_CONNECTED in config:
+        components.append("binary_sensor")
+    return components
+
+
+def connection_text_schema(mode):
+    schema = text_core.text_schema(SignalKConnectionText, entity_category="config", mode=mode).extend(
+        cv.COMPONENT_SCHEMA
+    )
+    if mode == "PASSWORD":
+        schema = schema.extend(
+            {
+                cv.Optional(CONF_MODE, default="PASSWORD"): cv.enum(
+                    {"PASSWORD": text_core.TEXT_MODES["PASSWORD"]}, upper=True
+                )
+            }
+        )
+    return schema
+
+
+CONNECTION_SETTINGS_SCHEMA = cv.Schema(
+    {
+        cv.Optional(CONF_HOST, default={"name": "SignalK server address"}): connection_text_schema("TEXT"),
+        cv.Optional(CONF_PORT, default={"name": "SignalK server port"}): number_core.number_schema(
+            SignalKConnectionPort, entity_category="config"
+        ).extend(cv.COMPONENT_SCHEMA),
+        cv.Optional(CONF_USERNAME, default={"name": "SignalK username"}): connection_text_schema("TEXT"),
+        cv.Optional(CONF_PASSWORD, default={"name": "SignalK password"}): connection_text_schema("PASSWORD"),
+        cv.Optional(CONF_APPLY, default={"name": "Apply SignalK connection settings"}): button_core.button_schema(
+            SignalKApplySettings, entity_category="config"
+        ),
+    }
+)
+
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(signalk),
         cv.Optional(CONF_HOST, default=""): cv.string,
-        cv.Optional(CONF_PORT, default=3000): cv.int_,
+        cv.Optional(CONF_PORT, default=3000): cv.int_range(min=1, max=65535),
         cv.Optional(CONF_NAME, default="esp32"): cv.string,
         cv.Optional(CONF_USERNAME, default=""): cv.string,
         cv.Optional(CONF_PASSWORD, default=""): cv.string,
+        cv.Optional(CONF_CONNECTION_SETTINGS): CONNECTION_SETTINGS_SCHEMA,
+        cv.Optional(CONF_CONNECTED): binary_sensor_core.binary_sensor_schema(
+            device_class="connectivity", entity_category="diagnostic"
+        ),
     }
 )
 
@@ -284,7 +344,26 @@ async def to_code(config):
     cg.add(var.set_device_name(config[CONF_NAME]))
     cg.add(var.set_user_name(config[CONF_USERNAME]))
     cg.add(var.set_user_password(config[CONF_PASSWORD]))
-    # signalk_meta(config, var)
+    if CONF_CONNECTION_SETTINGS in config:
+        cg.add_define("USE_SIGNALK_CONNECTION_SETTINGS")
+        settings = config[CONF_CONNECTION_SETTINGS]
+        for key, field, max_length in [
+            (CONF_HOST, ConnectionSettingField.HOST, 255),
+            (CONF_USERNAME, ConnectionSettingField.USERNAME, 63),
+            (CONF_PASSWORD, ConnectionSettingField.PASSWORD, 127),
+        ]:
+            entity = await text_core.new_text(settings[key], min_length=0, max_length=max_length)
+            await cg.register_component(entity, settings[key])
+            cg.add(entity.set_parent(var))
+            cg.add(entity.set_field(field))
+        port = await number_core.new_number(settings[CONF_PORT], min_value=1, max_value=65535, step=1)
+        await cg.register_component(port, settings[CONF_PORT])
+        cg.add(port.set_parent(var))
+        apply = await button_core.new_button(settings[CONF_APPLY])
+        cg.add(apply.set_parent(var))
+    if CONF_CONNECTED in config:
+        entity = await binary_sensor_core.new_binary_sensor(config[CONF_CONNECTED])
+        cg.add(var.set_connected_sensor(entity))
 
     # cg.add_library("bblanchon/ArduinoJson", "7.4.3")
     if CORE.is_esp32:

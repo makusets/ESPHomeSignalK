@@ -11,8 +11,14 @@ namespace signalk {
 
 static const char *const TAG = "signalk";
 
+void SignalKx86::disconnect() {
+  websocket_client_.stop();
+  isconnected_ = false;
+}
+
 bool SignalKx86::connect(const std::string &path) {
-  ESP_LOGD(TAG, "Connect (ix::WebSocket)");
+  websocket_client_.stop();
+  websocket_client_.disableAutomaticReconnection();
   char port_buf[6];
   snprintf(port_buf, sizeof(port_buf), "%u", static_cast<unsigned>(port_));
   std::string url = "ws://" + host_ + ":" + port_buf + path;
@@ -28,7 +34,7 @@ bool SignalKx86::connect(const std::string &path) {
   websocket_client_.setOnMessageCallback([this](const ix::WebSocketMessagePtr &msg) {
     if (msg->type == ix::WebSocketMessageType::Open) {
       ESP_LOGD(TAG, "WebSocket connected");
-      isconnected_ = true;  // ix::WebSocket is async; assume true for now
+      isconnected_ = true;
       this->on_connected();
 
     } else if (msg->type == ix::WebSocketMessageType::Close) {
@@ -38,19 +44,22 @@ bool SignalKx86::connect(const std::string &path) {
     } else if (msg->type == ix::WebSocketMessageType::Message) {
       this->on_message(msg->str);
     } else if (msg->type == ix::WebSocketMessageType::Error) {
-      isconnected_ = false;  // ix::WebSocket is async; assume true for now
-      ESP_LOGW(TAG, "WebSocket error: %s", msg->errorInfo.reason.c_str());
+      isconnected_ = false;
+      ESP_LOGW(TAG, "SignalK WebSocket failed (HTTP %d); retrying in 30 seconds", msg->errorInfo.http_status);
+      this->on_disconnected();
     }
   });
 
   websocket_client_.start();
 
-  ESP_LOGD(TAG, "Connected (ix::WebSocket)");
-  return false;
-  ;
+  ESP_LOGD(TAG, "SignalK WebSocket connection attempt started");
+  return true;
 }
 
-bool SignalKx86::discovery() { return true; }
+bool SignalKx86::discovery() {
+  ESP_LOGW(TAG, "SignalK discovery is unavailable on host; configure a host address");
+  return false;
+}
 
 bool SignalKx86::send(const std::string &msg) {
   if (websocket_client_.getReadyState() != ix::ReadyState::Open) {
@@ -75,7 +84,6 @@ HttpResponse SignalKx86::post(const std::string &path, const std::string &msg) {
   ix::WebSocketHttpHeaders headers;
   if (!token_.empty()) {
     auto auth = "Bearer " + token_;
-    ESP_LOGD(TAG, "Using auth: %s", auth.c_str());
     headers["Authorization"] = auth;
   }
   headers["Content-Type"] = "application/json";
@@ -98,7 +106,6 @@ HttpResponse SignalKx86::get(const std::string &path) {
   ix::WebSocketHttpHeaders headers;
   if (!token_.empty()) {
     auto auth = "Bearer " + token_;
-    ESP_LOGD(TAG, "Using auth: %s", auth.c_str());
     headers["Authorization"] = auth;
   }
   args->extraHeaders = headers;
@@ -112,7 +119,8 @@ HttpResponse SignalKx86::get(const std::string &path) {
 
 void SignalKx86::save_token() {
   constexpr size_t TOKEN_MAX_LENGTH = 256;
-  const char *filename = "token";  // or absolute path if you prefer
+  char filename[32];
+  snprintf(filename, sizeof(filename), "signalk-token-%08x", static_cast<unsigned>(token_storage_key_()));
 
   std::ofstream file(filename, std::ios::out | std::ios::trunc);
   if (!file.is_open()) {
@@ -125,12 +133,13 @@ void SignalKx86::save_token() {
   file.write(token_.c_str(), len);
   file.close();
 
-  ESP_LOGI(TAG, "Saved token to file '%s': %s", filename, token_.c_str());
+  ESP_LOGI(TAG, "Saved SignalK token to file '%s'", filename);
 }
 
 void SignalKx86::load_token() {
   constexpr size_t TOKEN_MAX_LENGTH = 256;
-  const char *filename = "token";
+  char filename[32];
+  snprintf(filename, sizeof(filename), "signalk-token-%08x", static_cast<unsigned>(token_storage_key_()));
 
   std::ifstream file(filename, std::ios::in);
   if (!file.is_open()) {
@@ -145,7 +154,7 @@ void SignalKx86::load_token() {
   token_ = std::string(buffer);
   if (!token_.empty()) {
     request_access_state_ = SignalKRequestAccessState::HASTOKEN;
-    ESP_LOGI(TAG, "Loaded token from file '%s': %s", filename, token_.c_str());
+    ESP_LOGI(TAG, "Loaded SignalK token from file '%s'", filename);
   } else {
     ESP_LOGW(TAG, "Token file was empty");
   }

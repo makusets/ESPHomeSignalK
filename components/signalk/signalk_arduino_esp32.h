@@ -13,6 +13,8 @@ class SignalKArduino : public SignalK {
  public:
   SignalKArduino() {}
   ~SignalKArduino();
+  void loop() override;
+  void disconnect() override;
   bool connect(const std::string &path) override;
   bool discovery() override;
   bool send(const std::string &msg) override;
