@@ -13,6 +13,12 @@ namespace signalk {
 
 static const char *const TAG = "signalk";
 
+// ESP-IDF can return an error while handling an HTTP authentication challenge.
+// Preserve received HTTP errors, but never treat an incomplete 2xx response as success.
+static int http_response_status(esp_err_t error, int status) {
+  return error == ESP_OK || (status >= 400 && status < 600) ? status : -1;
+}
+
 static void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
   auto self = static_cast<SignalKEspIdf *>(handler_args);
   esp_websocket_event_data_t *data = (esp_websocket_event_data_t *) event_data;
@@ -197,11 +203,12 @@ HttpResponse SignalKEspIdf::post(const std::string &path, const std::string &msg
   esp_http_client_set_header(client, "Content-Type", "application/json");
   esp_http_client_set_post_field(client, msg.c_str(), msg.length());
   esp_err_t err = esp_http_client_perform(client);
+  const int status = esp_http_client_get_status_code(client);
   if (err != ESP_OK)
-    ESP_LOGW(TAG, "SignalK HTTP POST failed: %s", esp_err_to_name(err));
+    ESP_LOGW(TAG, "SignalK HTTP POST error: %s (HTTP status %d)", esp_err_to_name(err), status);
 
   HttpResponse resp;
-  resp.status_code = err == ESP_OK ? esp_http_client_get_status_code(client) : -1;
+  resp.status_code = http_response_status(err, status);
   // this->content_length = esp_http_client_get_content_length(client);
 
   // ESP_LOGI(TAG, "POST Status = %d, content_length = %d", status, this->content_length);
@@ -233,12 +240,13 @@ HttpResponse SignalKEspIdf::get(const std::string &path) {
     esp_http_client_set_header(client, "Authorization", auth_header_.c_str());
   }
   esp_err_t err = esp_http_client_perform(client);
+  const int status = esp_http_client_get_status_code(client);
   if (err != ESP_OK) {
-    ESP_LOGE(TAG, "HTTP GET failed: %s", esp_err_to_name(err));
+    ESP_LOGW(TAG, "SignalK HTTP GET error: %s (HTTP status %d)", esp_err_to_name(err), status);
   }
 
   HttpResponse resp;
-  resp.status_code = err == ESP_OK ? esp_http_client_get_status_code(client) : -1;
+  resp.status_code = http_response_status(err, status);
   // this->content_length = esp_http_client_get_content_length(client);
 
   // ESP_LOGD(TAG, "GET Status = %d, content_length = %d", status, this->content_length);
