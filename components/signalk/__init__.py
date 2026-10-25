@@ -221,7 +221,9 @@ CONNECTION_SETTINGS_SCHEMA = cv.Schema(
         cv.Optional(CONF_HOST, default={"name": "SignalK server address"}): connection_text_schema("TEXT"),
         cv.Optional(CONF_PORT, default={"name": "SignalK server port"}): number_core.number_schema(
             SignalKConnectionPort, entity_category="config"
-        ).extend(cv.COMPONENT_SCHEMA),
+        )
+        .extend({cv.Optional(CONF_MODE, default="BOX"): cv.enum(number_core.NUMBER_MODES, upper=True)})
+        .extend(cv.COMPONENT_SCHEMA),
         cv.Optional(CONF_USERNAME, default={"name": "SignalK username"}): connection_text_schema("TEXT"),
         cv.Optional(CONF_PASSWORD, default={"name": "SignalK password"}): connection_text_schema("PASSWORD"),
         cv.Optional(CONF_APPLY, default={"name": "Apply SignalK connection settings"}): button_core.button_schema(
