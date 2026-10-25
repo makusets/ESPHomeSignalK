@@ -70,3 +70,7 @@ jobs:
 
       - name: Validate config
         run: .venv/bin/esphome config ${{ matrix.config }}
+
+      - name: Compile generated connection field references
+        if: matrix.config == 'tests/components/signalk/test.web-settings.yaml'
+        run: .venv/bin/python -m unittest discover -s tests/components/signalk -p 'test_connection_codegen.py'

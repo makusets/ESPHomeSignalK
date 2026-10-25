@@ -192,7 +192,7 @@ SIGNALK_META_SCHEMA = cv.Schema(
 CONF_CONNECTION_SETTINGS = "connection_settings"
 CONF_CONNECTED = "connected"
 CONF_APPLY = "apply"
-ConnectionSettingField = signalk_ns.enum("ConnectionSettingField")
+ConnectionSettingField = signalk_ns.enum("ConnectionSettingField", is_class=True)
 SignalKConnectionText = signalk_ns.class_("SignalKConnectionText", text_core.Text, cg.Component)
 SignalKConnectionPort = signalk_ns.class_("SignalKConnectionPort", number_core.Number, cg.Component)
 SignalKApplySettings = signalk_ns.class_("SignalKApplySettings", button_core.Button)
