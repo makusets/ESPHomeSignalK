@@ -66,7 +66,11 @@ jobs:
 
       - name: Create secrets
         run: |
-          printf "wifi_ssid: test\nwifi_password: test\nsignalk_host: 127.0.0.1\n" > examples/secrets.yaml
+          printf "wifi_ssid: test\nwifi_password: test_password\nsignalk_host: 127.0.0.1\n" > examples/secrets.yaml
 
       - name: Validate config
         run: .venv/bin/esphome config ${{ matrix.config }}
+
+      - name: Compile generated connection field references
+        if: matrix.config == 'tests/components/signalk/test.web-settings.yaml'
+        run: .venv/bin/python -m unittest discover -s tests/components/signalk -p 'test_connection_codegen.py'
