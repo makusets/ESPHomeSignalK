@@ -15,9 +15,16 @@ class ConnectionCodegenTest(unittest.TestCase):
     def test_generated_connection_fields_compile(self):
         root = Path(__file__).resolve().parents[3]
         fixture = root / "tests/components/signalk/test.web-settings.yaml"
-        with tempfile.TemporaryDirectory() as tmp:
+        # Older ESPHome releases resolve local component paths relative to the
+        # top-level config, so keep that config beside the fixture.
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.NamedTemporaryFile(
+                mode="w", suffix=".yaml", prefix=".codegen-", dir=fixture.parent
+            ) as config_file,
+        ):
             directory = Path(tmp)
-            config = directory / "test.yaml"
+            config = Path(config_file.name)
             build = directory / "build"
             config.write_text(
                 f"packages:\n  base: !include {json.dumps(str(fixture))}\n"
