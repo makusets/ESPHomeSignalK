@@ -337,3 +337,78 @@ If you have created something cool using this component, please let me know, we 
 
 1. Adding support for other esphome supported hardware types, e.g. rpi pico
 1. Better schema validation
+
+### Connection logs and retries
+
+The `signalk` logger reports server discovery, connection attempts, successful
+connections, disconnections, and authentication failures. Login refusals identify
+HTTP 401/403 and suggest checking the username and password. Passwords and access
+tokens are never included in these logs.
+
+An initial connection is attempted immediately. While disconnected, discovery,
+authentication, access approval polling, and WebSocket connection failures are
+retried every 30 seconds without blocking the ESPHome loop between attempts.
+After a disconnect, reconnection starts after 30 seconds. No YAML changes are
+needed. With no `host`, ESP32 devices discover `_signalk-http._tcp` services;
+host builds require an explicit `host`.
+
+### Configure SignalK from the ESPHome web server
+
+Connection controls and the connected binary sensor are created automatically
+whenever `signalk:` is configured. Enable the standard ESPHome web server to
+access them:
+
+```yaml
+web_server:
+  version: 3
+
+signalk:
+  host: 192.168.0.3  # Initial default; saved web settings take precedence.
+  port: 3000
+```
+
+The web page provides **SignalK server address**, **SignalK server port**,
+**SignalK username**, **SignalK password**, and **Apply SignalK connection
+settings**. Enter a hostname or IP address without `http://` or a path. Edit each
+field, then press Apply to save all settings and reconnect immediately, without
+reflashing or rebooting. Subsequent failures retain the 30-second retry interval.
+The settings survive restarts and override the YAML defaults. Invalid settings
+are logged and leave the existing connection unchanged.
+
+The password field is write-only: it always appears empty and never returns the
+saved password through entity state, the API, or web events. Leaving it untouched
+keeps the saved password; explicitly submitting an empty password clears it. Use
+both username and password for login, or clear both to use SignalK's access
+approval flow. An empty server address enables ESP32 server discovery. Settings
+are stored in the device's normal ESPHome preferences storage.
+
+**SignalK connected** is a connectivity binary sensor: on when the WebSocket is
+connected, off during authentication, retries, and disconnections. It is available
+in the web server and through the ESPHome API. No `connection_settings` or
+`connected` YAML entries are needed.
+
+Entity names and IDs can be customized individually:
+
+```yaml
+signalk:
+  connection_settings:
+    host:
+      name: "SignalK address"
+    port:
+      name: "SignalK port"
+    username:
+      name: "SignalK login"
+    password:
+      name: "SignalK password"
+    apply:
+      name: "Save and reconnect SignalK"
+  connected:
+    name: "SignalK connected"
+```
+
+Use ESPHome's `web_server.auth` if access to these settings should require a web
+login. The standard captive portal configures Wi-Fi; these SignalK controls live
+in the normal device web interface. Tokens are scoped to the server, port, and
+username so changing servers cannot reuse another server's token. Existing
+installations using access approval may need to approve the device once after
+upgrading to the scoped token storage.

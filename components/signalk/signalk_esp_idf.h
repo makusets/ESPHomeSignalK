@@ -16,20 +16,22 @@ class SignalKEspIdf : public SignalK {
   friend esp_err_t _http_event_handler(esp_http_client_event_t *evt);
 
  public:
-  SignalKEspIdf() { isconnected_ = false; }
+  SignalKEspIdf() {}
   ~SignalKEspIdf() {}
 
+  void disconnect() override;
   bool connect(const std::string &path) override;
   bool discovery() override;
   bool send(const std::string &msg) override;
-  bool is_connected() const override { return isconnected_; }
+  bool is_connected() const override {
+    return websocket_client != nullptr && esp_websocket_client_is_connected(websocket_client);
+  }
 
   HttpResponse get(const std::string &path) override;
   HttpResponse post(const std::string &path, const std::string &msg) override;
 
  private:
-  esp_websocket_client_handle_t websocket_client;
-  bool isconnected_;
+  esp_websocket_client_handle_t websocket_client{nullptr};
   std::string auth_header_;
 };
 

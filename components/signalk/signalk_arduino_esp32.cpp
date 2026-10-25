@@ -11,6 +11,18 @@ namespace signalk {
 static const char *const TAG = "signalk";
 using namespace websockets;
 
+SignalKArduino::~SignalKArduino() {}
+
+void SignalKArduino::loop() {
+  webSocketClient_.poll();
+  SignalK::loop();
+}
+
+void SignalKArduino::disconnect() {
+  webSocketClient_.close();
+  isconnected_ = false;
+}
+
 bool SignalKArduino::connect(const std::string &path) {
   // run callback when messages are received
   webSocketClient_.onMessage([&](WebsocketsMessage message) {
@@ -41,7 +53,7 @@ bool SignalKArduino::connect(const std::string &path) {
   }
 
   // Connect with custom headers
-  isconnected_ = webSocketClient_.connect(host_.c_str(), port_, "/signalk/v1/stream?subscribe=none");
+  isconnected_ = webSocketClient_.connect(host_.c_str(), port_, path.c_str());
   return isconnected_;
 }
 
@@ -52,15 +64,15 @@ bool SignalKArduino::send(const std::string &msg) {
 
 bool SignalKArduino::discovery() {
   if (!MDNS.begin("esp32")) {  // start mDNS responder with some hostname
-    Serial.println("Error starting mDNS");
+    ESP_LOGW(TAG, "Error starting mDNS");
     return false;
   }
 
-  Serial.println("mDNS started, querying for _signalk._http._tcp services...");
+  ESP_LOGI(TAG, "Querying for _signalk-http._tcp services");
 
-  int n = MDNS.queryService("_signalk", "_http");  // service, proto
+  int n = MDNS.queryService("signalk-http", "tcp");  // service, proto
   if (n == 0) {
-    Serial.println("No SignalK server found");
+    ESP_LOGW(TAG, "No SignalK server found");
     return false;
   }
 
@@ -68,10 +80,12 @@ bool SignalKArduino::discovery() {
     String host = MDNS.hostname(i);
     int port = MDNS.port(i);
 
-    Serial.printf("Found SignalK service: %s:%d\n", host.c_str(), port);
+    ESP_LOGI(TAG, "Found SignalK service: %s:%d", host.c_str(), port);
 
     // Save discovered host and port
     host_ = host.c_str();
+    if (host_.size() < 6 || host_.compare(host_.size() - 6, 6, ".local") != 0)
+      host_ += ".local";
     port_ = port;
   }
 

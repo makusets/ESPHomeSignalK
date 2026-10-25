@@ -1,0 +1,7 @@
+packages:
+  base: !include test.esp32-idf.yaml
+
+web_server:
+  version: 3
+
+# Connection controls and the connected sensor are created by the base signalk config.

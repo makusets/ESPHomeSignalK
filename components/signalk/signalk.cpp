@@ -4,6 +4,7 @@
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
 #include <regex>
+#include <cstdio>
 // #include "esphome/components/wifi/wifi_component.h"
 
 #include "signalk.h"
@@ -16,6 +17,13 @@ static const char *const TAG = "signalk";
 
 void SignalK::setup() {
   ESP_LOGD(TAG, "Setup");
+#ifdef USE_SIGNALK_CONNECTION_SETTINGS
+  setup_connection_settings_();
+#endif
+#ifdef USE_BINARY_SENSOR
+  if (connected_sensor_ != nullptr)
+    connected_sensor_->publish_state(false);
+#endif
 
   if (!this->user_name_.empty() && !this->user_password_.empty()) {
     prefered_access_method_ = SignalKPreferedAccessMethod::LOGIN;
@@ -32,22 +40,65 @@ void SignalK::setup() {
   }
 }
 
-void SignalK::update() {
-  if (prefered_access_method_ == SignalKPreferedAccessMethod::REQUEST_ACCESS) {
-    if (this->request_access_state_ == SignalKRequestAccessState::HASTOKEN)
-      this->validate_token();
-    else if (this->request_access_state_ == SignalKRequestAccessState::UNKNOWN)
-      this->send_access_request();
-    else if (this->request_access_state_ == SignalKRequestAccessState::PENDING)
-      this->poll_access_request();
-    else if (this->request_access_state_ == SignalKRequestAccessState::COMPLETED && !is_connected())
-      this->connect("/signalk/v1/stream?subscribe=none");
-  } else {
-    if (prefered_access_method_ == SignalKPreferedAccessMethod::LOGIN && login_state_ == SignalKLoginState::UNKNOWN)
-      this->login();
-    else if (this->login_state_ == SignalKLoginState::COMPLETED && !is_connected())
-      this->connect("/signalk/v1/stream?subscribe=none");
+void SignalK::loop() {
+#ifdef USE_SIGNALK_CONNECTION_SETTINGS
+  if (apply_settings_requested_)
+    apply_connection_settings_();
+#endif
+#ifdef USE_BINARY_SENSOR
+  const bool connected = is_connected();
+  if (connected_sensor_ != nullptr && connection_sensor_state_ != connected) {
+    connection_sensor_state_ = connected;
+    connected_sensor_->publish_state(connected);
   }
+#endif
+  if (is_connected())
+    return;
+  const uint32_t now = sk_millis();
+  if (connection_attempted_ && now - last_connection_attempt_ < 30000)
+    return;
+  connection_attempted_ = true;
+  last_connection_attempt_ = now;
+
+  if (host_.empty()) {
+    ESP_LOGI(TAG, "Searching for a SignalK server");
+    if (!discovery() || host_.empty()) {
+      ESP_LOGW(TAG, "No SignalK server found; retrying in 30 seconds");
+      return;
+    }
+    ESP_LOGI(TAG, "SignalK server found at %s:%u", host_.c_str(), port_);
+  }
+
+  if (prefered_access_method_ == SignalKPreferedAccessMethod::LOGIN) {
+    if (login_state_ != SignalKLoginState::COMPLETED)
+      login();
+    if (login_state_ != SignalKLoginState::COMPLETED) {
+      ESP_LOGW(TAG, "SignalK login unsuccessful; retrying in 30 seconds");
+      return;
+    }
+  } else {
+    if (request_access_state_ == SignalKRequestAccessState::DENIED)
+      request_access_state_ = SignalKRequestAccessState::UNKNOWN;
+    if (request_access_state_ == SignalKRequestAccessState::HASTOKEN)
+      validate_token();
+    if (request_access_state_ == SignalKRequestAccessState::UNKNOWN)
+      send_access_request();
+    else if (request_access_state_ == SignalKRequestAccessState::PENDING)
+      poll_access_request();
+    if (request_access_state_ != SignalKRequestAccessState::COMPLETED) {
+      ESP_LOGI(TAG, "SignalK access not ready; retrying in 30 seconds");
+      return;
+    }
+  }
+  ESP_LOGI(TAG, "Connecting to SignalK at %s:%u", host_.c_str(), port_);
+  if (!connect("/signalk/v1/stream?subscribe=none")) {
+    ESP_LOGW(TAG, "SignalK connection failed; retrying in 30 seconds");
+    login_state_ = SignalKLoginState::UNKNOWN;
+    request_access_state_ = token_.empty() ? SignalKRequestAccessState::UNKNOWN : SignalKRequestAccessState::HASTOKEN;
+  }
+}
+
+void SignalK::update() {
   if (is_connected()) {
     for (auto it = sensors_.begin(); it != sensors_.end(); ++it) {
       (*it)->update();
@@ -61,6 +112,7 @@ void SignalK::update() {
 void SignalK::dump_config() {}
 
 void SignalK::on_connected() {
+  ESP_LOGI(TAG, "Connected to SignalK at %s:%u", host_.c_str(), port_);
   std::set<std::string> topics;
   JsonDocument doc;
   doc["context"] = "vessels.self";
@@ -84,7 +136,9 @@ void SignalK::on_connected() {
 }
 
 void SignalK::on_disconnected() {
-  ESP_LOGW(TAG, "Disconnected from SignalK server");
+  ESP_LOGW(TAG, "Disconnected from SignalK server; retrying in 30 seconds");
+  connection_attempted_ = true;
+  last_connection_attempt_ = sk_millis();
   login_state_ = SignalKLoginState::UNKNOWN;
   if (!token_.empty())
     request_access_state_ = SignalKRequestAccessState::HASTOKEN;
@@ -100,27 +154,33 @@ void SignalK::login() {
   if (login_state_ == SignalKLoginState::COMPLETED) {
     return;
   }
-  // Throttle login requests to once every 2 seconds
-  static uint32_t last_login_attempt = 0;
-  uint32_t now = sk_millis();
-  if (now - last_login_attempt < 2000) {
-    return;
-  }
-  last_login_attempt = now;
 
   JsonDocument doc;
   doc["username"] = this->user_name_;
   doc["password"] = this->user_password_;
   std::string msg;
   serializeJson(doc, msg);
-  ESP_LOGD(TAG, "Trying to login: %s", msg.c_str());
+  ESP_LOGI(TAG, "Logging in to SignalK at %s:%u", host_.c_str(), port_);
   auto response = post("/signalk/v1/auth/login", msg);
-  ESP_LOGD(TAG, "Login request response: %s", response.body.c_str());
+  if (response.status_code <= 0) {
+    ESP_LOGW(TAG, "SignalK server unreachable at %s:%u (HTTP status %d)", host_.c_str(), port_, response.status_code);
+    return;
+  }
+  ESP_LOGI(TAG, "SignalK server responded at %s:%u (HTTP %d)", host_.c_str(), port_, response.status_code);
+  if (response.status_code == 401 || response.status_code == 403) {
+    login_state_ = SignalKLoginState::DENIED;
+    ESP_LOGE(TAG, "SignalK login denied: check username and password (HTTP %d)", response.status_code);
+    return;
+  }
+  if (response.status_code < 200 || response.status_code >= 300) {
+    ESP_LOGW(TAG, "SignalK login failed: HTTP %d", response.status_code);
+    return;
+  }
 
   JsonDocument resp_doc;
   DeserializationError error = deserializeJson(resp_doc, response.body);
   if (error) {
-    ESP_LOGE(TAG, "Failed to parse access request response: %s", error.c_str());
+    ESP_LOGE(TAG, "Invalid SignalK login response: %s", error.c_str());
     return;
   }
 
@@ -129,9 +189,11 @@ void SignalK::login() {
     save_token();
     login_state_ = SignalKLoginState::COMPLETED;
     ESP_LOGI(TAG, "Login request successful");
-  } else if (resp_doc["result"] == 401) {
+  } else if (resp_doc["result"] == 401 || resp_doc["result"] == 403) {
     login_state_ = SignalKLoginState::DENIED;
-    ESP_LOGE(TAG, "Login request denied");
+    ESP_LOGE(TAG, "SignalK login denied: check username and password");
+  } else {
+    ESP_LOGW(TAG, "SignalK login response contains no token");
   }
 }
 
@@ -140,13 +202,6 @@ void SignalK::send_access_request() {
     request_access_state_ = SignalKRequestAccessState::HASTOKEN;
     return;
   }
-  // Throttle login requests to once every 2 seconds
-  static uint32_t last_request_attempt = 0;
-  uint32_t now = sk_millis();
-  if (now - last_request_attempt < 2000) {
-    return;
-  }
-  last_request_attempt = now;
   JsonDocument doc;
   doc["clientId"] = get_uuid();
   doc["description"] = "ESPHome device: " + App.get_name();
@@ -155,7 +210,12 @@ void SignalK::send_access_request() {
 
   ESP_LOGD(TAG, "Trying to request access: %s", msg.c_str());
   auto response = post("/signalk/v1/access/requests", msg);
-  ESP_LOGD(TAG, "Access request response: %s", response.body.c_str());
+  ESP_LOGD(TAG, "Access request response: HTTP %d", response.status_code);
+  if (response.status_code < 200 || response.status_code >= 300) {
+    ESP_LOGW(TAG, "SignalK access request failed at %s:%u (HTTP status %d)", host_.c_str(), port_,
+             response.status_code);
+    return;
+  }
 
   JsonDocument resp_doc;
   DeserializationError error = deserializeJson(resp_doc, response.body);
@@ -181,16 +241,13 @@ void SignalK::send_access_request() {
 }
 
 void SignalK::poll_access_request() {
-  // Throttle down polling to once per second
-  static uint32_t last_request_access_attempt = 0;
-  uint32_t now = sk_millis();
-  if (now - last_request_access_attempt < 1000) {
+  auto response = get(request_access_href_);
+  ESP_LOGD(TAG, "Access request status response: HTTP %d", response.status_code);
+  if (response.status_code < 200 || response.status_code >= 300) {
+    ESP_LOGW(TAG, "SignalK access request failed at %s:%u (HTTP status %d)", host_.c_str(), port_,
+             response.status_code);
     return;
   }
-  last_request_access_attempt = now;
-
-  auto response = get(request_access_href_);
-  ESP_LOGD(TAG, "Access request status response: %s", response.body.c_str());
 
   JsonDocument resp_doc;
   DeserializationError error = deserializeJson(resp_doc, response.body);
@@ -212,25 +269,24 @@ void SignalK::poll_access_request() {
       if (!token_.empty()) {
         save_token();
       }
-      ESP_LOGI(TAG, "Access token: %s", token_.c_str());
+      if (token_.empty()) {
+        request_access_state_ = SignalKRequestAccessState::UNKNOWN;
+        ESP_LOGW(TAG, "SignalK approval response contains no token");
+        return;
+      }
+      ESP_LOGI(TAG, "SignalK access approved");
     }
   }
 }
 
 void SignalK::validate_token() {
-  static uint32_t last_validation_attempt = 0;
-  uint32_t now = sk_millis();
-  if (now - last_validation_attempt < 2000) {
-    return;
-  }
-  last_validation_attempt = now;
   ESP_LOGD(TAG, "Validating token");
   auto response = get("/signalk/v1/stream");
-  ESP_LOGD(TAG, "Token validation response:  %d %s", response.status_code, response.body.c_str());
+  ESP_LOGD(TAG, "Token validation response: HTTP %d", response.status_code);
   if (response.status_code == 426) {
     request_access_state_ = SignalKRequestAccessState::COMPLETED;
     ESP_LOGI(TAG, "Token validation successful");
-  } else if (response.status_code == 401) {
+  } else if (response.status_code == 401 || response.status_code == 403) {
     token_.clear();
     save_token();
     request_access_state_ = SignalKRequestAccessState::UNKNOWN;
@@ -240,14 +296,20 @@ void SignalK::validate_token() {
   }
 }
 
+uint32_t SignalK::token_storage_key_() const {
+  char port[6];
+  snprintf(port, sizeof(port), "%u", static_cast<unsigned>(port_));
+  return fnv1_hash("signalk-token:" + host_ + ":" + port + ":" + user_name_);
+}
+
 void SignalK::save_token() {
   constexpr size_t TOKEN_MAX_LENGTH = 256;
   char token_buffer[TOKEN_MAX_LENGTH] = {0};
-  uint32_t hash = fnv1_hash("signalk" + this->host_);
-  auto pref = global_preferences->make_preference<char[TOKEN_MAX_LENGTH]>(10000, true);
+  uint32_t hash = token_storage_key_();
+  auto pref = global_preferences->make_preference<char[TOKEN_MAX_LENGTH]>(hash, true);
   memcpy(token_buffer, token_.c_str(), std::min(token_.size(), sizeof(token_buffer) - 1));
   if (pref.save(&token_buffer)) {
-    ESP_LOGI(TAG, "Saved token to preferences: %s", token_.c_str());
+    ESP_LOGI(TAG, "Saved SignalK token to preferences");
   } else {
     ESP_LOGE(TAG, "Failed to save token");
   }
@@ -256,13 +318,13 @@ void SignalK::save_token() {
 void SignalK::load_token() {
   constexpr size_t TOKEN_MAX_LENGTH = 256;
   char token_buffer[TOKEN_MAX_LENGTH] = {0};
-  uint32_t hash = fnv1_hash("signalk" + this->host_);
-  auto pref = global_preferences->make_preference<char[TOKEN_MAX_LENGTH]>(10000, true);
+  uint32_t hash = token_storage_key_();
+  auto pref = global_preferences->make_preference<char[TOKEN_MAX_LENGTH]>(hash, true);
   if (pref.load(&token_buffer)) {
     token_ = std::string(token_buffer);
     if (!token_.empty()) {
       request_access_state_ = SignalKRequestAccessState::HASTOKEN;
-      ESP_LOGI(TAG, "Loaded token: %s", token_.c_str());
+      ESP_LOGI(TAG, "Loaded stored SignalK token");
       return;
     }
   } else {

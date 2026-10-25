@@ -15,6 +15,7 @@ class SignalKx86 : public SignalK {
   SignalKx86() { isconnected_ = false; }
   ~SignalKx86() {}
 
+  void disconnect() override;
   bool connect(const std::string &path) override;
   bool discovery() override;
   bool send(const std::string &msg) override;
