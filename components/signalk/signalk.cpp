@@ -134,10 +134,11 @@ void SignalK::on_connected() {
   std::string output;
   serializeJsonPretty(doc, output);
   ESP_LOGD(TAG, "Subscription message: %s", output.c_str());
-  if (!send(output))
+  if (!send(output)) {
     ESP_LOGE(TAG, "Failed to send SignalK subscriptions; sensor values will not arrive");
-  else
+  } else {
     ESP_LOGI(TAG, "Sent subscriptions for %u SignalK paths; waiting for values", static_cast<unsigned>(topics.size()));
+  }
 }
 
 void SignalK::on_disconnected() {
@@ -348,8 +349,9 @@ void SignalK::on_message(const std::string &msg) {
   }
   if (doc["statusCode"].is<int>()) {
     int status = doc["statusCode"].as<int>();
-    if (status >= 400)
+    if (status >= 400) {
       ESP_LOGW(TAG, "SignalK server reported stream/request error: statusCode=%d", status);
+    }
   }
   JsonArray updates = doc["updates"].as<JsonArray>();
   ESP_LOGV(TAG, "Received SignalK message with %u updates", static_cast<unsigned>(updates.size()));
@@ -378,8 +380,9 @@ void SignalK::on_receive_delta(JsonArray &arr) {
         set_sensor_value(subscriber, delta["value"]);
       }
     }
-    if (!matched)
+    if (!matched) {
       ESP_LOGV(TAG, "No subscriber matches received SignalK path '%s'", path.c_str());
+    }
   }
 }
 
