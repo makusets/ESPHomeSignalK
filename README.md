@@ -384,7 +384,8 @@ are stored in the device's normal ESPHome preferences storage.
 
 **SignalK connected** is a connectivity binary sensor: on when the WebSocket is
 connected, off during authentication, retries, and disconnections. It is available
-in the web server and through the ESPHome API. No `connection_settings` or
+in the main sensor list of the web server and through the ESPHome API. It is
+public and has no diagnostic category by default. No `connection_settings` or
 `connected` YAML entries are needed.
 
 Entity names and IDs can be customized individually:

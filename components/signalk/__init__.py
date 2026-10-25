@@ -241,9 +241,9 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_USERNAME, default=""): cv.string,
         cv.Optional(CONF_PASSWORD, default=""): cv.string,
         cv.Optional(CONF_CONNECTION_SETTINGS, default={}): CONNECTION_SETTINGS_SCHEMA,
-        cv.Optional(CONF_CONNECTED, default={"name": "SignalK connected"}): binary_sensor_core.binary_sensor_schema(
-            device_class="connectivity", entity_category="diagnostic"
-        ),
+        cv.Optional(
+            CONF_CONNECTED, default={"name": "SignalK connected", "internal": False}
+        ): binary_sensor_core.binary_sensor_schema(device_class="connectivity"),
     }
 )
 

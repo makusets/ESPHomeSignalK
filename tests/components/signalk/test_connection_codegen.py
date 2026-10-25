@@ -39,6 +39,14 @@ class ConnectionCodegenTest(unittest.TestCase):
             self.assertEqual(generated.returncode, 0, generated.stdout + generated.stderr)
             main = (build / "src/main.cpp").read_text()
             self.assertIn("->traits.set_mode(number::NUMBER_MODE_BOX);", main)
+            self.assertIn('"SignalK connected"', main)
+            self.assertIn("->set_connected_sensor(", main)
+            self.assertNotIn("ENTITY_CATEGORY_DIAGNOSTIC", main)
+            registrations = [line for line in main.splitlines() if "register_binary_sensor(" in line]
+            self.assertTrue(registrations)
+            for line in registrations:
+                self.assertNotIn("category:diagnostic", line)
+                self.assertNotIn("internal", line)
             fields = re.findall(r"->set_field\(([^)]+)\)", main)
             self.assertEqual(len(fields), 3)
             header = (root / "components/signalk/connection_settings.h").read_text()
